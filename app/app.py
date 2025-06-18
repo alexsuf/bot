@@ -65,7 +65,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = "Alex"
     log_message_to_db(username, "/start")
     await update.message.reply_text(
-        "Напишите сообщение или нажмите кнопку:",
+        "Выберите действие:",
         reply_markup=get_main_buttons()
     )
 
@@ -96,6 +96,35 @@ async def send_random_cat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Картинок не найдено 😿", reply_markup=get_main_buttons())
 
+# === /base — вывод пользователей из bot_users ===
+async def show_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    username = "Alex"
+    log_message_to_db(username, "/base")
+
+    if not conn:
+        await update.message.reply_text("Нет соединения с базой данных.")
+        return
+
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT name, email, password FROM bot_users;")
+            rows = cursor.fetchall()
+            if not rows:
+                await update.message.reply_text("Нет пользователей в базе.", reply_markup=get_main_buttons())
+                return
+
+            lines = []
+            for i, (name, email, password) in enumerate(rows, start=1):
+                email_part = email if email else "—"
+                password_masked = "●●●●●●"
+                lines.append(f"{i}. 👤 {name}\n📧 {email_part}\n🔒 {password_masked}")
+
+            message = "\n\n".join(lines)
+            await update.message.reply_text(message, reply_markup=get_main_buttons())
+
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка при чтении данных: {e}", reply_markup=get_main_buttons())
+
 # === Обработка обычных сообщений ===
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = "Alex"
@@ -118,6 +147,7 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("info", show_info))
     app.add_handler(CommandHandler("cats", send_random_cat))
+    app.add_handler(CommandHandler("base", show_users))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
     print("Бот запущен...")
