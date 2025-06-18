@@ -140,7 +140,7 @@ async def show_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = "Alex"
     log_message_to_db(username, "/menu")
-    await update.message.reply_text("Меню загружено:", reply_markup=get_dynamic_menu())
+    await update.message.reply_text("Выберите пункт меню:", reply_markup=get_dynamic_menu())
 
 # === Обработка текстовых сообщений и вызов действий по кнопкам ===
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
