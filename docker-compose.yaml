@@ -1,0 +1,11 @@
+services:
+  bot:
+    image: alexsuf/bot
+    container_name: bot
+    stdin_open: true
+    tty: true
+    environment:
+      TZ: Europe/Moscow
+    volumes:
+      - ./app:/app
+    command: "python3 /app/app.py"
