@@ -53,21 +53,32 @@ def log_message_to_db(username: str, message: str):
         except Exception as e:
             print("Ошибка записи лога:", e)
 
-# === Кнопки клавиатуры ===
+# === Статическая клавиатура по умолчанию ===
 def get_main_buttons():
     keyboard = [
         ["Главное меню ℹ", "Показать кота 🐱"]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
+# === Динамическое меню из bot_menu ===
+def get_dynamic_menu():
+    if not conn:
+        return get_main_buttons()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT menu_name, menu_action FROM bot_menu;")
+            rows = cursor.fetchall()
+            keyboard = [[name] for name, _ in rows] if rows else [["Главный экран ℹ", "Показать кота 🐱"]]
+            return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    except Exception as e:
+        print("Ошибка чтения меню:", e)
+        return get_main_buttons()
+
 # === /start ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = "Alex"
     log_message_to_db(username, "/start")
-    await update.message.reply_text(
-        "Выберите действие:",
-        reply_markup=get_main_buttons()
-    )
+    await update.message.reply_text("Напишите или нажмите кнопку:", reply_markup=get_main_buttons())
 
 # === /info ===
 async def show_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -80,7 +91,7 @@ async def show_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Файл с информацией не найден.", reply_markup=get_main_buttons())
 
-# === /cats и кнопка "Показать кота 🐱" ===
+# === /cats ===
 async def send_random_cat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = "Alex"
     log_message_to_db(username, "/cats")
@@ -96,10 +107,10 @@ async def send_random_cat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Картинок не найдено 😿", reply_markup=get_main_buttons())
 
-# === /base — вывод пользователей из bot_users ===
+# === /users (вместо /base) ===
 async def show_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = "Alex"
-    log_message_to_db(username, "/base")
+    log_message_to_db(username, "/users")
 
     if not conn:
         await update.message.reply_text("Нет соединения с базой данных.")
@@ -125,18 +136,42 @@ async def show_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Ошибка при чтении данных: {e}", reply_markup=get_main_buttons())
 
-# === Обработка обычных сообщений ===
+# === /menu — отображение динамического меню ===
+async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    username = "Alex"
+    log_message_to_db(username, "/menu")
+    await update.message.reply_text("Меню загружено:", reply_markup=get_dynamic_menu())
+
+# === Обработка текстовых сообщений и вызов действий по кнопкам ===
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = "Alex"
     user_message = update.message.text
     log_message_to_db(username, user_message)
 
+    # Команды с кнопок из базы
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT menu_name, menu_action FROM bot_menu WHERE menu_item = 'base';")
+            rows = cursor.fetchall()
+            menu_map = {name: action for name, action in rows}
+            action = menu_map.get(user_message)
+            if action == "/info":
+                await show_info(update, context)
+                return
+            elif action == "/cats":
+                await send_random_cat(update, context)
+                return
+            elif action == "/users":
+                await show_users(update, context)
+                return
+    except Exception as e:
+        print("Ошибка поиска действия по кнопке:", e)
+
+    # Кнопки по умолчанию
     if user_message == "Показать кота 🐱":
         await send_random_cat(update, context)
-
     elif user_message == "Информация о боте ℹ" or user_message == "Главное меню ℹ":
         await show_info(update, context)
-
     else:
         await update.message.reply_text(f"Вы написали: {user_message}", reply_markup=get_main_buttons())
 
@@ -147,7 +182,8 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("info", show_info))
     app.add_handler(CommandHandler("cats", send_random_cat))
-    app.add_handler(CommandHandler("base", show_users))
+    app.add_handler(CommandHandler("users", show_users))
+    app.add_handler(CommandHandler("menu", show_menu))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
     print("Бот запущен...")
