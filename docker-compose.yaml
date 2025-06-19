@@ -8,4 +8,5 @@ services:
       TZ: Europe/Moscow
     volumes:
       - ./app:/app
+      - ./files:/files
     command: "python3 /app/app.py"

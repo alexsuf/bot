@@ -3,6 +3,7 @@ import json
 import random
 import psycopg2
 from telegram import Update, ReplyKeyboardMarkup
+from telegram.constants import ParseMode
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -41,6 +42,11 @@ try:
 except Exception as e:
     print("Ошибка подключения к БД:", e)
 
+# === Получение Telegram username ===
+def extract_username(update: Update) -> str:
+    user = update.message.from_user
+    return user.username or f"{user.first_name} {user.last_name or ''}".strip() or "Неизвестный"
+
 # === Логирование в базу ===
 def log_message_to_db(username: str, message: str):
     if conn:
@@ -56,19 +62,23 @@ def log_message_to_db(username: str, message: str):
 # === Статическая клавиатура по умолчанию ===
 def get_main_buttons():
     keyboard = [
-        ["Главное меню ℹ", "Показать кота 🐱"]
+        ["Стартовая страница", "Меню ℹ"]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 # === Динамическое меню из bot_menu ===
-def get_dynamic_menu():
+def get_dynamic_menu(username: str):
     if not conn:
         return get_main_buttons()
     try:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT menu_name, menu_action FROM bot_menu;")
+            print("Получение меню для пользователя:", username)
+            if username == 'alexeyzadonsky':
+                cursor.execute("SELECT menu_name, menu_action FROM bot_menu WHERE menu_item = 'alexeyzadonsky' ORDER BY menu_id;")
+            else:
+                cursor.execute("SELECT menu_name, menu_action FROM bot_menu WHERE menu_item = 'base' ORDER BY menu_id;")
             rows = cursor.fetchall()
-            keyboard = [[name] for name, _ in rows] if rows else [["Главный экран ℹ", "Показать кота 🐱"]]
+            keyboard = [[name] for name, _ in rows] if rows else [["Стартовая страница", "Меню ℹ"]]
             return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     except Exception as e:
         print("Ошибка чтения меню:", e)
@@ -76,13 +86,13 @@ def get_dynamic_menu():
 
 # === /start ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    username = "Alex"
+    username = extract_username(update)
     log_message_to_db(username, "/start")
-    await update.message.reply_text("Напишите или нажмите кнопку:", reply_markup=get_main_buttons())
+    await show_info(update, context)
 
 # === /info ===
 async def show_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    username = "Alex"
+    username = extract_username(update)
     log_message_to_db(username, "/info")
     if os.path.exists(INFO_FILE):
         with open(INFO_FILE, "r", encoding="utf-8") as f:
@@ -93,7 +103,7 @@ async def show_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # === /cats ===
 async def send_random_cat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    username = "Alex"
+    username = extract_username(update)
     log_message_to_db(username, "/cats")
 
     image_files = [
@@ -107,9 +117,9 @@ async def send_random_cat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Картинок не найдено 😿", reply_markup=get_main_buttons())
 
-# === /users (вместо /base) ===
+# === /users ===
 async def show_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    username = "Alex"
+    username = extract_username(update)
     log_message_to_db(username, "/users")
 
     if not conn:
@@ -136,19 +146,19 @@ async def show_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Ошибка при чтении данных: {e}", reply_markup=get_main_buttons())
 
-# === /menu — отображение динамического меню ===
+# === /menu ===
 async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    username = "Alex"
+    username = extract_username(update)
     log_message_to_db(username, "/menu")
-    await update.message.reply_text("Выберите пункт меню:", reply_markup=get_dynamic_menu())
+    await update.message.reply_text("Выберите пункт меню:", reply_markup=get_dynamic_menu(username))
 
-# === Обработка текстовых сообщений и вызов действий по кнопкам ===
+# === Обработка текстовых сообщений ===
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    username = "Alex"
+    username = extract_username(update)
     user_message = update.message.text
     log_message_to_db(username, user_message)
 
-    # Команды с кнопок из базы
+    # Команды из таблицы bot_menu
     try:
         with conn.cursor() as cursor:
             cursor.execute("SELECT menu_name, menu_action FROM bot_menu WHERE menu_item = 'base';")
@@ -167,13 +177,16 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print("Ошибка поиска действия по кнопке:", e)
 
-    # Кнопки по умолчанию
+    # Обработка встроенных кнопок
     if user_message == "Показать кота 🐱":
         await send_random_cat(update, context)
-    elif user_message == "Информация о боте ℹ" or user_message == "Главное меню ℹ":
+    elif user_message in ["Стартовая страница", "Главное меню ℹ"]:
         await show_info(update, context)
+    elif user_message == "Меню ℹ":
+        await show_menu(update, context)
     else:
-        await update.message.reply_text(f"Вы написали: {user_message}", reply_markup=get_main_buttons())
+        msg = f"<b>{username}</b> написал: {user_message}"
+        await update.message.reply_text(msg, reply_markup=get_main_buttons(), parse_mode=ParseMode.HTML)
 
 # === Запуск бота ===
 if __name__ == '__main__':
