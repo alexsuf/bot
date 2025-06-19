@@ -2,12 +2,13 @@ import os
 import json
 import random
 import psycopg2
-from telegram import Update, ReplyKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     ContextTypes,
     filters
 )
@@ -25,6 +26,10 @@ default_menu_map = {
     "Стартовая страница": "/start",
     "Меню ℹ": "/menu"
 }
+
+# === Параметры опроса ===
+POLL_OPTIONS = ["🍎 Яблоко", "🍌 Банан", "🍇 Виноград", "🍊 Апельсин"]
+user_poll_state = {}
 
 # === Чтение конфигурации базы данных из JSON-файла ===
 def read_db_config(path: str):
@@ -169,6 +174,45 @@ async def show_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Ошибка при получении логов: {e}")
 
+# === /poll (multiple choice) ===
+async def start_poll(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_poll_state[user_id] = set()
+    keyboard = [[InlineKeyboardButton(opt, callback_data=f"poll:{i}")] for i, opt in enumerate(POLL_OPTIONS)]
+    keyboard.append([InlineKeyboardButton("✨ ГОТОВО ✨", callback_data="poll:done")])
+    await update.message.reply_text("Выберите любимые фрукты (можно несколько):", reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def handle_poll_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    data = query.data
+
+    if user_id not in user_poll_state:
+        user_poll_state[user_id] = set()
+
+    if data == "poll:done":
+        selected = [POLL_OPTIONS[i] for i in sorted(user_poll_state[user_id])]
+        text = "Вы выбрали:\n" + "\n".join(f"• {s}" for s in selected) if selected else "Вы ничего не выбрали."
+        await query.edit_message_text(text=text)
+        del user_poll_state[user_id]
+        return
+
+    if data.startswith("poll:"):
+        index = int(data.split(":")[1])
+        if index in user_poll_state[user_id]:
+            user_poll_state[user_id].remove(index)
+        else:
+            user_poll_state[user_id].add(index)
+
+        keyboard = []
+        for i, opt in enumerate(POLL_OPTIONS):
+            prefix = "✅ " if i in user_poll_state[user_id] else "☐ "
+            keyboard.append([InlineKeyboardButton(f"{prefix}{opt}", callback_data=f"poll:{i}")])
+        keyboard.append([InlineKeyboardButton("✨ ГОТОВО ✨", callback_data="poll:done")])
+
+        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
+
 # === Обработка текстовых сообщений ===
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
@@ -179,7 +223,6 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         menu_map = default_menu_map.copy()
-
         if conn:
             with conn.cursor() as cursor:
                 if telegram_username == 'alexeyzadonsky':
@@ -203,12 +246,13 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await show_menu(update, context)
             elif action == "/start":
                 await start(update, context)
+            elif action == "/poll":
+                await start_poll(update, context)
             return
 
     except Exception as e:
         print("Ошибка поиска действия по кнопке:", e)
 
-    # Если не совпало с кнопками
     msg = f"<b>{username}</b> написал: {user_message}"
     await update.message.reply_text(msg, reply_markup=get_main_buttons(), parse_mode=ParseMode.HTML)
 
@@ -222,8 +266,9 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("users", show_users))
     app.add_handler(CommandHandler("menu", show_menu))
     app.add_handler(CommandHandler("logs", show_logs))
+    app.add_handler(CommandHandler("poll", start_poll))
+    app.add_handler(CallbackQueryHandler(handle_poll_callback, pattern="^poll:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
     print("Бот запущен...")
     app.run_polling()
-
